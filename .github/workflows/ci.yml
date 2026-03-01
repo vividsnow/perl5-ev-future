@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  linux-debian:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    strategy:
+      matrix:
+        perl-version: [ '5.36' ]
+    name: "Debian - Perl ${{ matrix.perl-version }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential perl cpanminus
+      - name: Install Perl dependencies
+        run: cpanm --quiet --notest EV
+      - name: Build and Test
+        run: |
+          perl Makefile.PL
+          make
+          make test
+
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        perl-version: [ '5.30', '5.38', '5.40' ]
+    name: "Linux - Perl ${{ matrix.perl-version }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl-version }}
+      - name: Install dependencies
+        run: cpanm --quiet --notest EV
+      - name: Build and Test
+        run: |
+          perl Makefile.PL
+          make
+          make test
+
+  macos:
+    runs-on: macos-latest
+    name: "macOS - Latest"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+      - name: Install dependencies
+        run: cpanm --quiet --notest EV
+      - name: Build and Test
+        run: |
+          perl Makefile.PL
+          make
+          make test
+
+  freebsd:
+    runs-on: ubuntu-latest
+    name: "FreeBSD - Latest"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y perl5 p5-EV p5-App-cpanminus
+          run: |
+            perl Makefile.PL
+            make
+            make test

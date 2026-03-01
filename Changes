@@ -1,0 +1,6 @@
+Revision history for EV-Future
+
+0.01    Sun Mar  1 2026
+        - Initial release
+        - Support for parallel, parallel_limit and series control flow in XS
+        - Support for unsafe mode and cancellation
