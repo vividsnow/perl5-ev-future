@@ -1,4 +1,3 @@
-.github/workflows/ci.yml
 bench/benchmark.pl
 bench/comparison.pl
 Changes

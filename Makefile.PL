@@ -17,6 +17,7 @@ WriteMakefile(ev_args(
     AUTHOR            => 'vividsnow',
     LICENSE           => 'perl_5',
     MIN_PERL_VERSION  => '5.010000',
+    PM                => { 'lib/EV/Future.pm' => '$(INST_LIB)/EV/Future.pm' },
     OBJECT            => '$(O_FILES)',
     META_MERGE => {
         'meta-spec' => { version => 2 },

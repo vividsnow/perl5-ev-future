@@ -300,7 +300,8 @@ subtest 'holes_and_magic' => sub {
     sub TIEARRAY { bless [], shift }
     sub FETCH { $_[0][$_[1]] }
     sub STORE { $_[0][$_[1]] = $_[2] }
-    sub FETCHSIZE { 3 }
+    sub FETCHSIZE { scalar @{$_[0]} }
+    sub DESTROY {}
 
     package main;
     my @magic;
@@ -376,6 +377,16 @@ subtest 'parallel_limit' => sub {
     parallel_limit([sub { $ran = 1; shift->() }], 2, sub { }, 1);
     is($ran, 1, 'parallel_limit unsafe mode executes');
 
+    # Unsafe mode multi-task (SP drift regression)
+    my $unsafe_count = 0;
+    my $unsafe_fin = 0;
+    parallel_limit(
+        [map { sub { $unsafe_count++; shift->() } } 1..100],
+        10, sub { $unsafe_fin = 1 }, 1
+    );
+    is($unsafe_count, 100, 'unsafe parallel_limit: all 100 sync tasks ran');
+    is($unsafe_fin, 1, 'unsafe parallel_limit: final_cb called');
+
     # Stress with small limit
     my $done_count = 0;
     my @tasks = map { sub { $done_count++; shift->() } } 1..1000;
@@ -437,6 +448,49 @@ subtest 'parallel_limit_extras' => sub {
     is($zero_limit_fin, 1, 'parallel_limit clamps limit=0 to 1');
 };
 
+subtest 'all_non_coderef' => sub {
+    my $fin = 0;
+    series([undef, undef, undef], sub { $fin = 1 });
+    is($fin, 1, 'series handles all-non-coderef tasks');
+
+    $fin = 0;
+    parallel([undef, undef], sub { $fin = 1 });
+    is($fin, 1, 'parallel handles all-non-coderef tasks');
+};
+
+subtest 'unsafe_async' => sub {
+    # parallel unsafe async
+    my ($p_ran, $p_fin) = (0, 0);
+    our @uw;
+    parallel([
+        map { sub { my $d = shift; push @uw, EV::timer 0.01, 0, sub { $p_ran++; $d->() } } } 1..3
+    ], sub { $p_fin = 1; EV::break }, 1);
+    EV::run;
+    is($p_ran, 3, 'unsafe parallel: all async tasks ran');
+    is($p_fin, 1, 'unsafe parallel: final_cb called');
+    @uw = ();
+
+    # parallel_limit unsafe async
+    my ($pl_ran, $pl_fin) = (0, 0);
+    parallel_limit([
+        map { sub { my $d = shift; push @uw, EV::timer 0.01, 0, sub { $pl_ran++; $d->() } } } 1..4
+    ], 2, sub { $pl_fin = 1; EV::break }, 1);
+    EV::run;
+    is($pl_ran, 4, 'unsafe parallel_limit: all async tasks ran');
+    is($pl_fin, 1, 'unsafe parallel_limit: final_cb called');
+    @uw = ();
+
+    # series unsafe async
+    my ($s_ran, $s_fin) = (0, 0);
+    series([
+        map { sub { my $d = shift; push @uw, EV::timer 0.01, 0, sub { $s_ran++; $d->() } } } 1..3
+    ], sub { $s_fin = 1; EV::break }, 1);
+    EV::run;
+    is($s_ran, 3, 'unsafe series: all async tasks ran');
+    is($s_fin, 1, 'unsafe series: final_cb called');
+    @uw = ();
+};
+
 subtest 'parallel_limit_async' => sub {
     # Async: verify concurrency limit with timers
     my $max_active = 0;
@@ -460,6 +514,21 @@ subtest 'parallel_limit_async' => sub {
     EV::run;
     is($done_count, 6, 'all 6 async tasks completed');
     ok($max_active <= 3, "max active ($max_active) <= limit 3");
+    @w = ();
+
+    # Out-of-order completion with variable delays
+    ($done_count, $max_active, $active) = (0, 0, 0);
+    my @delays = (0.04, 0.01, 0.03, 0.01, 0.02);
+    parallel_limit([
+        map { my $d = $_; sub {
+            my $done = shift;
+            $active++; $max_active = $active if $active > $max_active;
+            push @w, EV::timer $d, 0, sub { $active--; $done_count++; $done->() };
+        }} @delays
+    ], 2, sub { EV::break });
+    EV::run;
+    is($done_count, 5, 'all 5 out-of-order tasks completed');
+    ok($max_active <= 2, "out-of-order max active ($max_active) <= limit 2");
     @w = ();
 };
 

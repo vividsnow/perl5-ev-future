@@ -231,9 +231,7 @@ static void _series_next(pTHX_ series_ctx **ctx_ptr) {
                 SPAGAIN;
                 if (SvTRUE(ERRSV)) {
                     SV *err = sv_mortalcopy(ERRSV);
-                    if (!ctx->is_freed_ptr || !*(ctx->is_freed_ptr)) {
-                        series_cleanup(aTHX_ ctx_ptr);
-                    }
+                    series_cleanup(aTHX_ ctx_ptr);
                     croak_sv(err);
                 }
             }
@@ -511,8 +509,8 @@ parallel(tasks, final_cb, ...)
                 PUTBACK;
 
                 call_sv(task_sv, flags);
-                SPAGAIN;
                 if (!unsafe) {
+                    SPAGAIN;
                     if (SvTRUE(ERRSV)) {
                         SV *err = sv_mortalcopy(ERRSV);
                         if (!is_freed) {

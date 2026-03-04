@@ -12,6 +12,8 @@
 ^test_.*\.pl$
 ^EV-Future-.*\.tar\.gz$
 ^\.git/
+^\.github/
 ^\.gitignore$
 ^MANIFEST\.SKIP$
 \.gc(ov|da|no)$
+^MANIFEST\.bak$
