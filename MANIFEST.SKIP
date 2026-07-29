@@ -14,6 +14,11 @@
 ^\.git/
 ^\.github/
 ^\.gitignore$
+^_Inline/
+^\.claude/
+^\.pcg/
+^\.superpowers/
+^docs/
 ^MANIFEST\.SKIP$
 \.gc(ov|da|no)$
 ^MANIFEST\.bak$
