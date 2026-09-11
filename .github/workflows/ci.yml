@@ -12,7 +12,7 @@ jobs:
     container: alpine:latest
     name: "Alpine Linux"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install system dependencies
         run: apk add --no-cache build-base perl perl-dev perl-app-cpanminus
       - name: Install Perl dependencies
@@ -31,7 +31,7 @@ jobs:
         perl-version: [ '5.36' ]
     name: "Debian - Perl ${{ matrix.perl-version }}"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install system dependencies
         run: |
           apt-get update
@@ -51,7 +51,7 @@ jobs:
         perl-version: [ '5.30', '5.38', '5.40' ]
     name: "Linux - Perl ${{ matrix.perl-version }}"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Perl
         uses: shogo82148/actions-setup-perl@v1
         with:
@@ -68,7 +68,7 @@ jobs:
     runs-on: macos-latest
     name: "macOS - Latest"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Perl
         uses: shogo82148/actions-setup-perl@v1
         with:
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     name: "FreeBSD - Latest"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Test on FreeBSD
         uses: vmactions/freebsd-vm@v1
         with:
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     name: "Valgrind"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Perl
         uses: shogo82148/actions-setup-perl@v1
         with:
@@ -128,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     name: "ASan + UBSan"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Perl
         uses: shogo82148/actions-setup-perl@v1
         with:

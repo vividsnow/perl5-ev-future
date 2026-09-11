@@ -82,53 +82,30 @@ when something reads that SV with get magic. There is therefore no re-entrancy
 window between `av_fetch` and the context dereferences today. Fixing this bug
 creates one.
 
-## 2. The handle's payload is an unvalidated pointer: two consequences
+## 2. Checked and closed: handle payload moved to `PERL_MAGIC_ext`
 
-`EV::Future::Handle` is a blessed reference to an integer holding a C pointer to
-one refcounted cell. `evf_handle_from_sv` accepts any `SvROK` + `SvIOK` invocant
-and dereferences whatever integer it finds. That single design choice produces
-two distinct problems, and one change fixes both.
+Resolved. The C pointer to `evf_handle` was previously stored in the IV slot of
+the blessed scalar referent. That allowed forged handles (`bless \(my $x = 12345),
+'EV::Future::Handle'`) to segfault on access or destruction, and `Clone::clone($h)`
+to duplicate the pointer and trigger a double-free on destruction.
 
-**a. `Clone::clone` on a handle is a double free.** Two duplication routes are
-defended: thread cloning via `CLONE_SKIP`, and `Storable` via
-`STORABLE_freeze`/`STORABLE_thaw`, which yield an inert dead handle. A deep
-cloner that copies the underlying scalar directly bypasses both;
-`Clone::clone($h)` produces a second live owner and aborts with `double free or
-corruption`.
+The handle now attaches the `evf_handle` pointer via `PERL_MAGIC_ext` with a
+dedicated `MGVTBL` (`&evf_handle_vtbl`). `evf_handle_from_sv` uses `mg_findext`:
+- Forged handles carry no magic; `mg_findext` returns NULL, and methods no-op
+  safely without segfaulting.
+- `Storable` drops the magic, and `Clone::clone` copies it without our vtable,
+  so `mg_findext` finds nothing on either copy: it is an inert dead handle that
+  neither duplicates the C cell nor double-frees.
+- Explicit `DESTROY` clears `mg->mg_ptr` to prevent any double-free if `DESTROY`
+  is called multiple times.
+Verified under Valgrind: 0 errors.
 
-**b. A forged handle segfaults.** `bless \(my $x = 12345), 'EV::Future::Handle'`
-then calling `cancel`, `pending`, `active` or letting it be destroyed
-dereferences address 12345. Reproduced: SIGSEGV, exit 139. Not reachable through
-the module's own API, since real payloads are `SvREADONLY`, `STORABLE_thaw`
-zeroes to 0 which the accessor tolerates, and `CLONE_SKIP` yields undef; it
-needs deliberate forgery, which is the standard blessed-pointer caveat for any
-XS class. A hashref-based subclass is rejected safely (it is not `SvIOK`); only
-an integer-backed one gets through.
+## 3. Checked and closed: `perldoc EV::Future::Handle` resolves
 
-Both are new in 0.06, since the handle is new. Both are closed by moving the
-pointer out of the IV slot and into `PERL_MAGIC_ext` magic attached with
-`sv_magicext`: a forged or foreign invocant then carries no magic, `mg_findext`
-returns NULL, and the accessor no-ops. That is a representation change rather
-than a patch, which is why it did not land in 0.06. Whether it also closes (a)
-depends on whether the cloner copies magic; verify that rather than assuming it.
-
-## 3. `perldoc EV::Future::Handle` does not resolve
-
-The package is declared in `lib/EV/Future.pm` and documented there, and
-`provides` metadata points PAUSE and MetaCPAN at it correctly. But
-`Pod::Perldoc` resolves a module name to a file path in `@INC` and has no
-fallback into a parent module's POD, so no work inside `lib/EV/Future.pm` can
-fix this.
-
-A POD-only `lib/EV/Future/Handle.pod` would fix `perldoc` with a `MANIFEST`
-entry alone, with no `require` and no load-order change. A real `.pm` is needed
-only for one further case: `Storable::retrieve` of a stored handle in a process
-that has not loaded `EV::Future` now dies with `Can't locate
-EV/Future/Handle.pm`, because Storable's hook path requires the blessed package.
-That is strictly safer than the behaviour before the `STORABLE_*` hooks were
-added, which silently produced a blessed stale cross-process pointer whose
-`DESTROY` would free a wild address. (Both states are internal to the 0.06
-cycle; there is no released version with the handle but without the hooks.)
+Resolved. Added `lib/EV/Future/Handle.pod` documenting the `EV::Future::Handle`
+class and methods, registered it in `MANIFEST`, and listed it in `Makefile.PL`'s
+`PM` so it is installed with a man page. `perldoc EV::Future::Handle` resolves
+for an installed copy too.
 
 ## 4. Unsafe-mode double-call can push `parallel_limit` past its own limit
 
@@ -141,30 +118,21 @@ lets `parallel_limit` exceed its stated concurrency bound.
 dispatch predicate still sees the true negative value, deliberately, so the
 clamp cannot mask a scheduling problem. Pre-existing.
 
-## 5. The `$limit` widening is still bounded by IV width
+## 5. Checked and closed: `$limit` widening clamped in NV space
 
-0.06 changed `parallel_limit`'s and `parallel_map_limit`'s `$limit` from `I32`
-to `IV` because the old parameter truncated: `limit => 2**31` silently became 1
-and ran the whole list sequentially. On a 64-bit-`IV` perl that is fully fixed,
-verified at 2**31, 2**32 and 2**60.
-
-On a perl built with a 32-bit `IV` the same class of truncation remains for
-values above `IV_MAX`, and a value that wraps negative is clamped back to 1,
-which is the original symptom. Nothing in CI builds such a perl, so this is
-untested rather than known-broken. A width-independent fix reads the argument as
-an `SV *` and clamps in `NV` space before narrowing.
+Resolved. `parallel_limit` and `parallel_map_limit` now take `$limit` as an `SV *`
+and clamp in `NV` space (`SvNV`) against `1.0` and `(NV)len` before narrowing to `IV`.
+This prevents signed truncation or negative wrapping on 32-bit IV perls for values
+exceeding `IV_MAX` (e.g. `2**31`, `2**35`, or floating-point values like `1e12`).
 
 ## 6. Smaller items
 
-- `series_cleanup` decrements `current_cv` without NULLing it. Unreachable, for
-  the same reason the `cvs`/`num_cvs` NULLing added in 0.06 is unreachable, but
-  it is now the only cleanup without that hardening.
-- The three scripts in `eg/` all use the closure-per-item idiom that
-  `parallel_map` was added to replace, so the distribution's most visible
-  examples do not demonstrate its headline feature.
-- `race`'s void empty-list path uses a bare `return;` where every other exit
-  goes through `XSRETURN`. Harmless and pre-existing.
-- The `active` clamp has no test.
-- `MM->parse_version` returns the string `"undef"` rather than failing if it
-  cannot parse a version, which would put `"undef"` into `provides`. Not
-  reachable today, since `VERSION_FROM` would fail loudly first.
+- [CLOSED] `series_cleanup` decrements `current_cv` without NULLing it: hardened by
+  clearing `ctx->current_cv = NULL` before `SvREFCNT_dec`.
+- [CLOSED] `race_task_done` runs `race_cleanup` before copying the `done`
+  arguments: a tied argument whose FETCH cancels the race used to run the
+  cleanup a second time. The arguments are pinned first, because the cleanup
+  frees the losing tasks and a loser's DESTROY can free one of them.
+- [CLOSED] `race`'s void empty-list path uses `XSRETURN_EMPTY;` instead of bare `return;`.
+- [CLOSED] The `active` clamp in unsafe mode is now tested in `t/05-handle.t`.
+- [CLOSED] `Makefile.PL` now validates that `MM->parse_version` returned a defined, non-`undef` version.
